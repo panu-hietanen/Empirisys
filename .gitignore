@@ -1,5 +1,6 @@
 .idea
 .ipynb_checkpoints
 .venv
+.env
 Data/*
 Outputs/*
