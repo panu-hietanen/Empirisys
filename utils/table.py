@@ -15,6 +15,59 @@ from typing_extensions import Self
 import os
 import logging
 import sys
+import csv
+import json
+from ast import literal_eval
+
+class TableEntry:
+    def __init__(self, 
+                 partition_key: Optional[str] = None, 
+                 row_key: Optional[str] = None, 
+                 boost_labels: Optional[List[str]] = None,
+                 description: str = '', 
+                 manual_labels: Optional[List[str]] = None, 
+                 ratings: Optional[Dict[str, str]] = None, 
+                 reviewed: bool = False,
+                 entry: Optional[Union[TableEntity, Dict[str, Any]]] = None):
+        if entry:
+            self.PartitionKey = entry['PartitionKey']
+            self.RowKey = entry['RowKey']
+            self.BoostLabels = entry['BoostLabels']
+            self.Description = entry['Description']
+            self.ManualLabels = entry['ManualLabels']
+            self.Ratings = entry['Ratings']
+            self.reviewed = entry['reviewed']
+        else:
+            self.PartitionKey = partition_key
+            self.RowKey = row_key
+            self.BoostLabels = json.dumps(boost_labels or [])  # Convert list to JSON string
+            self.Description = description
+            self.ManualLabels = json.dumps(manual_labels or [])  # Convert list to JSON string
+            self.Ratings = json.dumps(ratings or {})  # Convert dictionary to JSON string
+            self.reviewed = reviewed
+
+    def __str__(self: Self):
+        return str(self.to_dict())
+
+    def to_dict(self: Self) -> Dict[str, Any]:
+        return {
+            'PartitionKey': self.PartitionKey,
+            'RowKey': self.RowKey,
+            'BoostLabels': self.BoostLabels,
+            'Description': self.Description,
+            'ManualLabels': self.ManualLabels,
+            'Ratings': self.Ratings,
+            'reviewed': self.reviewed
+        }
+
+    def data(self: Self) -> Dict[str, Any]:
+        return {
+            'BoostLabels': self.BoostLabels,
+            'Description': self.Description,
+            'ManualLabels': self.ManualLabels,
+            'Ratings': self.Ratings,
+            'reviewed': self.reviewed
+        }
 
 class Table:
     """Table class for Azure Table Storage operations."""
@@ -65,6 +118,19 @@ class Table:
         except AzureError as e:
             self.logger.error(f"Error creating entity in table {self.table_name}: {e}")
 
+    def create_entity(self: Self, entity: TableEntry):
+        """Create an entity within a table given an existing entity"""
+        new_entity = {
+            'PartitionKey': entity.PartitionKey,
+            'RowKey': entity.RowKey,
+            **entity.data(),
+        }
+        try:
+            self.client.create_entity(entity=new_entity)
+            self.logger.info(f"Entity created in table {self.table_name}.")
+        except AzureError as e:
+            self.logger.error(f"Error creating entity in table {self.table_name}: {e}")
+
     def update_with_dict(self: Self, old: TableEntity, data: Dict[str, Any]) -> None:
         """Update an entity using a dictionary of new data.
         
@@ -87,7 +153,7 @@ class Table:
         except AzureError as e:
             self.logger.error(f"Error updating entity ({data['PartitionKey']}, {data['RowKey']}) in table {self.table_name}: {e}")
 
-    def get_data(self: Self, filters: str) -> Optional[ItemPaged[TableEntity]]:
+    def get_data(self: Self, filters: str = None) -> Optional[ItemPaged[TableEntity]]:
         """Get data that matches filters.
         
         Returns:
@@ -138,3 +204,51 @@ class Table:
                 self.logger.error(f"Entity at ({partition}, {row}) not found.")
         except AzureError as e:
             self.logger.error(f"Error marking entity as reviewed in table {self.table_name}: {e}")
+
+    def to_csv(self: Self, path: str) -> None:
+        headers = [
+            'PartitionKey',
+            'RowKey',
+            'BoostLabels',
+            'Description',
+            'ManualLabels',
+            'Ratings',
+            'reviewed',
+        ]
+        try:
+            entities = self.get_data()
+            if entities:
+                with open(path, mode='w', newline='') as csv_file:
+                    writer = csv.DictWriter(csv_file, fieldnames=headers)
+                    writer.writeheader()
+                    for entity in entities:
+                        writer.writerow(entity)
+            else:
+                self.logger.info(f"No entities to write.")
+        except Exception as e:
+            self.logger.error(f"Error writing to CSV: {e}")
+            raise
+    
+    def import_csv(self: Self, path: str) -> None:
+        headers = [
+            'PartitionKey',
+            'RowKey',
+            'BoostLabels',
+            'Description',
+            'ManualLabels',
+            'Ratings',
+            'reviewed',
+        ]
+        try:
+            with open(path, mode='r') as csv_file:
+                reader = csv.DictReader(csv_file)
+                if reader.fieldnames != headers:
+                    self.logger.error('Error: CSV headers do not match.')
+                    raise Exception('Please provide an appropriately formatted CSV file.')
+                for row in reader:
+                    entry = TableEntry(entry=row)
+                    self.create_entity(entry)
+            self.logger.info(f"Entities imported successfully from {path}.")
+        except Exception as e:
+            self.logger.error(f"Error importing from CSV: {e}")
+            raise
