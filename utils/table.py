@@ -252,3 +252,21 @@ class Table:
         except Exception as e:
             self.logger.error(f"Error importing from CSV: {e}")
             raise
+
+    def delete_all_entries(self: Self) -> None:
+        """Delete all entities from the table. 
+        
+        WARNING: WILL DELETE ALL DATA
+        ---
+        """
+        try:
+            entities = self.get_data()
+            if entities:
+                for entity in entities:
+                    self.delete_entity(entity['PartitionKey'], entity['RowKey'])
+                self.logger.info(f"All entities deleted from table {self.table_name}.")
+            else:
+                self.logger.info(f"No entities to delete in table {self.table_name}.")
+        except AzureError as e:
+            self.logger.error(f"Error deleting entities in table {self.table_name}: {e}")
+            raise
