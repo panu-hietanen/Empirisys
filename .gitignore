@@ -4,3 +4,4 @@
 .env
 Data/*
 Outputs/*
+utils/__pycache__
